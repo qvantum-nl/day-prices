@@ -1,0 +1,91 @@
+# Fetches the day-ahead prices and publishes the JSON file on GitHub Pages.
+#
+# Times are UTC and do not follow summer time: 11:20 to 16:20 UTC is
+# 12:20 to 17:20 in winter and 13:20 to 18:20 in summer (Dutch time).
+# The first run that finds tomorrow's prices writes and publishes the file.
+# Later runs that day change nothing. The last run of the day (21:20 UTC)
+# fails on purpose when tomorrow is still missing, so that someone gets a message.
+
+name: day-prices
+on:
+  schedule:
+    - cron: "20 11-16 * * *"
+    - cron: "20 21 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: day-prices
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      code: ${{ steps.fetch.outputs.code }}
+      publish: ${{ steps.commit.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Offline checks
+        run: python3 script/test_fetch_day_prices.py
+      - name: Fetch prices
+        id: fetch
+        # Exit code 3 means: tomorrow is not published yet. That is normal for the early runs.
+        run: |
+          set +e
+          python3 script/fetch_day_prices.py --log-csv trial/log.csv
+          code=$?
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          if [ "$code" = "0" ] || [ "$code" = "3" ]; then exit 0; fi
+          exit $code
+      - name: Commit what changed
+        id: commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs trial
+          publish=false
+          if ! git diff --cached --quiet -- docs; then publish=true; fi
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then publish=true; fi
+          if ! git diff --cached --quiet; then
+            git commit -m "Day-ahead prices updated"
+            git push
+          fi
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+      - name: Package the site
+        if: steps.commit.outputs.publish == 'true'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: docs
+
+  publish:
+    needs: fetch
+    if: needs.fetch.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v5
+
+  missing:
+    needs: fetch
+    if: needs.fetch.outputs.code == '3' && github.event.schedule == '20 21 * * *'
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "Tomorrow's prices are still not available from the source."
+          exit 1

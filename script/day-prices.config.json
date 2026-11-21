@@ -1,0 +1,29 @@
+{
+  "zone": "NL",
+  "source": "smard",
+  "keep_days": 8,
+  "output": "../docs/day-prices-{zone}.json",
+  "examples": [
+    {"id": "sunny", "date": "2026-04-26"},
+    {"id": "winter", "date": "2026-01-08"}
+  ],
+  "zones": {
+    "NL": {
+      "label": "Nederland",
+      "timezone": "Europe/Amsterdam",
+      "smard_filter": 256,
+      "entsoe_eic": "10YNL----------L"
+    },
+    "DE-LU": {
+      "label": "Deutschland/Luxemburg",
+      "timezone": "Europe/Berlin",
+      "smard_filter": 4169,
+      "entsoe_eic": "10Y1001A1001A82H"
+    },
+    "SE3": {
+      "label": "Sverige SE3",
+      "timezone": "Europe/Stockholm",
+      "entsoe_eic": "10Y1001A1001A46L"
+    }
+  }
+}

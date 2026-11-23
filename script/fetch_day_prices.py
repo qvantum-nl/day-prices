@@ -12,8 +12,12 @@ shortly after the prices for tomorrow are published (around 13:00 CET).
 Standard library only (Python 3.9+). No keys in this file or in the config:
 the optional ENTSO-E source reads its token from the environment variable ENTSOE_TOKEN.
 
+The target day follows the local clock: before noon a page needs today, from noon on also
+tomorrow. A scheduled run that starts hours late, after midnight, therefore checks the right day.
+
 Exit codes: 0 = file holds the target day, 3 = target day not published yet (run again later),
-1 = error (the existing file is left untouched).
+4 = target day overdue (from 22:00 local, or before noon for today), reported once per day
+when --alarm-state is given, 1 = error (the existing file is left untouched).
 """
 import argparse
 import datetime as dt
@@ -34,6 +38,9 @@ UTC = dt.timezone.utc
 HERE = os.path.dirname(os.path.abspath(__file__))
 # Harmonised limits of the European day-ahead auction, in EUR/MWh. Anything outside is a data error.
 PRICE_MIN, PRICE_MAX = -500.0, 4000.0
+# Local hours. From NEXT_DAY_FROM_HOUR a page needs tomorrow's prices too; from LATE_HOUR they are overdue.
+NEXT_DAY_FROM_HOUR = 12
+LATE_HOUR = 22
 
 SOURCES = {
     "smard": {
@@ -282,6 +289,30 @@ def log_state(path, now, today, have):
     return True
 
 
+def needed_day(now):
+    """The day a page needs at this local moment: today before noon, tomorrow from noon on."""
+    return now.date() + dt.timedelta(days=1 if now.hour >= NEXT_DAY_FROM_HOUR else 0)
+
+
+def is_overdue(now):
+    """True when the needed day should have been there by now: late evening, or the morning of that day."""
+    return now.hour >= LATE_HOUR or now.hour < NEXT_DAY_FROM_HOUR
+
+
+def alarm_once(path, day):
+    """True the first time an alarm is raised for this day. Remembers the day in a small text file."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            if f.read().strip() == day.isoformat():
+                return False
+    except OSError:
+        pass
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(day.isoformat() + "\n")
+    return True
+
+
 def parse_day(text, today):
     if text in ("today", "vandaag"):
         return today
@@ -301,6 +332,7 @@ def main(argv=None):
     ap.add_argument("--keep", type=int, help="number of most recent days to keep in the file")
     ap.add_argument("--compare", choices=sorted(CHECKERS), help="cross-check the fetched days against another source")
     ap.add_argument("--log-csv", help="trial log: append a line to this CSV file each time the state changes")
+    ap.add_argument("--alarm-state", help="file that remembers the last overdue day reported (exit code 4 once per day)")
     ap.add_argument("--now", help="pretend it is this moment (ISO, local to the zone), for testing")
     ap.add_argument("--dry-run", action="store_true", help="fetch and report, do not write")
     args = ap.parse_args(argv)
@@ -323,8 +355,8 @@ def main(argv=None):
     if args.date:
         start = end = target = parse_day(args.date, today)
     else:
-        target = today + dt.timedelta(days=1)
-        start, end = today - dt.timedelta(days=max(keep - 2, 0)), target
+        target = needed_day(now)
+        start, end = today - dt.timedelta(days=max(keep - 2, 0)), today + dt.timedelta(days=1)
 
     try:
         fetched = {d: (source, h) for d, h in FETCHERS[source](zone, start, end, tz).items()}
@@ -417,6 +449,9 @@ def main(argv=None):
 
     if target.isoformat() in have:
         return 0
+    if not args.date and not args.dry_run and args.alarm_state and is_overdue(now) and alarm_once(args.alarm_state, target):
+        print("ALARM: the prices for %s are overdue" % target)
+        return 4
     print("target day %s is not in the file yet: run again later" % target)
     return 3
 

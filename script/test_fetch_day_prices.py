@@ -115,6 +115,31 @@ def test_trial_log_only_on_change():
         assert lines[2] == "2026-11-21T12:20Z,2026-11-21,0,1,2026-11-22,2"
 
 
+def test_needed_day_follows_the_clock():
+    # the evening check that GitHub started at 01:50 on 23 Nov must look for 23 Nov, not 24 Nov
+    assert f.needed_day(dt.datetime(2026, 11, 23, 2, 50, tzinfo=AMS)) == dt.date(2026, 11, 23)
+    assert f.needed_day(dt.datetime(2026, 11, 23, 11, 59, tzinfo=AMS)) == dt.date(2026, 11, 23)
+    assert f.needed_day(dt.datetime(2026, 11, 23, 12, 13, tzinfo=AMS)) == dt.date(2026, 11, 24)
+    assert f.needed_day(dt.datetime(2026, 11, 23, 23, 43, tzinfo=AMS)) == dt.date(2026, 11, 24)
+
+
+def test_overdue_window():
+    assert f.is_overdue(dt.datetime(2026, 11, 23, 22, 13, tzinfo=AMS))
+    assert f.is_overdue(dt.datetime(2026, 11, 24, 0, 43, tzinfo=AMS))
+    assert not f.is_overdue(dt.datetime(2026, 11, 23, 12, 13, tzinfo=AMS))
+    assert not f.is_overdue(dt.datetime(2026, 11, 23, 21, 43, tzinfo=AMS))
+
+
+def test_alarm_once_per_day():
+    import os
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "trial", "alarm.txt")
+        assert f.alarm_once(path, dt.date(2026, 11, 24)) is True
+        assert f.alarm_once(path, dt.date(2026, 11, 24)) is False
+        assert f.alarm_once(path, dt.date(2026, 11, 25)) is True
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:

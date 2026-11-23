@@ -1,16 +1,20 @@
 # Fetches the day-ahead prices and publishes the JSON file on GitHub Pages.
 #
-# Times are UTC and do not follow summer time: 11:20 to 16:20 UTC is
-# 12:20 to 17:20 in winter and 13:20 to 18:20 in summer (Dutch time).
+# GitHub starts scheduled runs late and skips many of them: in the first days of the
+# trial runs started 2 to 4.5 hours late and only about one in four ran at all.
+# So the workflow is scheduled every half hour, off the full hour, from 11:13 to 22:43 UTC
+# (12:13 to 23:43 in winter, 13:13 to 00:43 in summer, Dutch time). It only takes one run.
+#
 # The first run that finds tomorrow's prices writes and publishes the file.
-# Later runs that day change nothing. The last run of the day (21:20 UTC)
-# fails on purpose when tomorrow is still missing, so that someone gets a message.
+# Later runs change nothing. Which day a run checks follows the local clock, not the schedule:
+# before noon today, from noon on tomorrow. When that day is still missing from 22:00 local,
+# or in the morning of the day itself, the job "missing" fails once for that day,
+# so that someone gets a message. trial/alarm.txt remembers which day was reported.
 
 name: day-prices
 on:
   schedule:
-    - cron: "20 11-16 * * *"
-    - cron: "20 21 * * *"
+    - cron: "13,43 11-22 * * *"
   workflow_dispatch: {}
 
 permissions:
@@ -38,14 +42,14 @@ jobs:
         run: python3 script/test_fetch_day_prices.py
       - name: Fetch prices
         id: fetch
-        # Exit code 3 means: tomorrow is not published yet. That is normal for the early runs.
+        # Exit code 3: the day is not published yet, normal for the early runs.
+        # Exit code 4: the day is overdue, reported once; the job "missing" turns it into a failure.
         run: |
           set +e
-          python3 script/fetch_day_prices.py --log-csv trial/log.csv
+          python3 script/fetch_day_prices.py --log-csv trial/log.csv --alarm-state trial/alarm.txt
           code=$?
           echo "code=$code" >> "$GITHUB_OUTPUT"
-          if [ "$code" = "0" ] || [ "$code" = "3" ]; then exit 0; fi
-          exit $code
+          case "$code" in 0|3|4) exit 0 ;; *) exit "$code" ;; esac
       - name: Commit what changed
         id: commit
         run: |
@@ -83,9 +87,9 @@ jobs:
 
   missing:
     needs: fetch
-    if: needs.fetch.outputs.code == '3' && github.event.schedule == '20 21 * * *'
+    if: needs.fetch.outputs.code == '4'
     runs-on: ubuntu-latest
     steps:
       - run: |
-          echo "Tomorrow's prices are still not available from the source."
+          echo "The day-ahead prices for the next day are overdue at the source. See the log of the job fetch for the day."
           exit 1

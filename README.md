@@ -11,7 +11,9 @@ If you show the prices, keep the attribution "Bundesnetzagentur | SMARD.de" with
 
 ## How it works
 
-A scheduled workflow runs `script/fetch_day_prices.py` every hour in the early afternoon. The first run that finds tomorrow's prices writes `docs/day-prices-NL.json` and publishes it. Later runs that day change nothing. Each run also looks back a week and adds days the source delivered late. The file keeps the eight most recent days.
+A scheduled workflow runs `script/fetch_day_prices.py` every half hour from early afternoon until late evening. GitHub starts scheduled runs late and skips many of them, so there are many attempts; one is enough. The first run that finds tomorrow's prices writes `docs/day-prices-NL.json` and publishes it. Later runs that day change nothing.
+
+The day a run checks follows the local clock: before noon today, from noon on tomorrow. When that day is still missing from 22:00 local time, or in the morning of the day itself, the workflow fails once for that day so that someone gets a message (`trial/alarm.txt` remembers the day). Each run also looks back a week and adds days the source delivered late. The file keeps the eight most recent days.
 
 When the source has no prices for a day, that day is simply not in the file. A page that reads the file should show the last known day with its date.
 
@@ -45,7 +47,7 @@ python3 script/fetch_day_prices.py
 python3 script/fetch_day_prices.py --date 2026-11-22
 ```
 
-Exit code 0: the file holds the target day. Exit code 3: the target day is not published yet. Exit code 1: error, the file is left as it is.
+Exit code 0: the file holds the target day. Exit code 3: the target day is not published yet. Exit code 4: the target day is overdue, reported once per day when `--alarm-state` is given. Exit code 1: error, the file is left as it is.
 
 ## Another bidding zone
 
